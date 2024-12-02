@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  golang-crud:
+    container_name: golang-crud
+    build:
+      context: ./build/app
+      dockerfile: Dockerfile
+    tty: true
+    ports:
+      - 8080:8080
+    env_file:
+      - ./build/db/.env
+    depends_on:
+      - db
+    volumes:
+      - type: bind
+        source: .
+        target: /go/app
+    networks:
+      - golang_test_network
+
+  db:
+    container_name: db
+    build:
+      context: ./build/db
+      dockerfile: Dockerfile
+    tty: true
+    platform: linux/amd64
+    ports:
+      - 3307:3306
+    env_file:
+      - ./build/db/.env
+    volumes:
+      - type: volume
+        source: mysql_test_volume
+        target: /var/lib/mysql
+      - type: bind
+        source: ./build/db/init
+        target: /docker-entrypoint-initdb.d
+    networks:
+      - golang_test_network
+
+volumes:
+  mysql_test_volume:
+    name: mysql_test_volume
+
+networks:
+  golang_test_network:
+    external: true
