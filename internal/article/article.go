@@ -28,32 +28,17 @@ func init() {
 
 	// ParseGlob関数で、web/template/*に格納されたテンプレートファイルを全て読み込み、tmplに格納する
 	tmpl, _ = template.New("article").Funcs(funcMap).ParseGlob("web/template/*")
+
+	// GORMを使ってデータベース接続を設定し、AutoMigrateでArticleテーブルをデータベースに作成または更新する
+	utility.Db.Set("gorm:table_options", "ENGINE = InnoDB").AutoMigrate(article{})
 }
 
 func Index(w http.ResponseWriter, r *http.Request) {
-	// データベースから全ての列を取得するコマンド
-	selected, err := utility.Db.Query("SELECT * FROM article")
-	if err != nil {
-		panic(err.Error())
-	}
-	// 記事データ格納用
-	data := []article{}
-	// データベースから取得した各行を処理
-	// selected.Next()はデータベースから返された各行にアクセスするための繰り返し処理
-	for selected.Next() {
-		article := article{}
-		// 現在の行のデータをarticleという構造体に読み込ませる
-		err = selected.Scan(&article.Id, &article.Title, &article.Body)
-		if err != nil {
-			panic(err.Error())
-		}
-		data = append(data, article)
-	}
-	// データベースとの接続を閉じる
-	selected.Close()
-
-	// テンプレートを使ってHTMLを生成し、クライアントに返す
-	if err := tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
+	var allArticles []article
+	// GORMを使って、articleテーブルから全ての記事を取得する
+	utility.Db.Find(&allArticles)
+	// index.htmlテンプレートを使って、取得した記事データを表示する
+	if err := tmpl.ExecuteTemplate(w, "index.html", allArticles); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -61,23 +46,10 @@ func Index(w http.ResponseWriter, r *http.Request) {
 func Show(w http.ResponseWriter, r *http.Request) {
 	// URLからidを取得
 	id := r.URL.Query().Get("id")
-	// データベースから指定されたidの記事を取得
-	selected, err := utility.Db.Query("SELECT * FROM article WHERE id = ?", id)
-	if err != nil {
-		panic(err.Error())
-	}
-	// データベースの結果を処理
-	article := article{}
-	for selected.Next() {
-		err = selected.Scan(&article.Id, &article.Title, &article.Body)
-		if err != nil {
-			panic(err.Error())
-		}
-	}
-	// データベースとの接続を閉じる
-	selected.Close()
-
-	// テンプレートを使ってHTMLを生成し、クライアントに返す
+	var article article
+	// articleテーブルから指定されたIDの記事を1件取得
+	utility.Db.First(&article, id)
+	// show.htmlテンプレートを使って、取得した記事を表示する
 	tmpl.ExecuteTemplate(w, "show.html", article)
 }
 
@@ -89,13 +61,8 @@ func Create(w http.ResponseWriter, r *http.Request) {
 	} else if r.Method == "POST" {
 		title := r.FormValue("title")
 		body := r.FormValue("body")
-		// データベースに新しい記事を挿入
-		insert, err := utility.Db.Prepare("INSERT INTO article(title, body) VALUES(?, ?)")
-		if err != nil {
-			panic(err.Error())
-		}
-		insert.Exec(title, body)
-		// 記事作成後、トップページへリダイレクト
+		article := article{Title: title, Body: body}
+		utility.Db.Create(&article)
 		http.Redirect(w, r, "/", 301)
 	}
 }
@@ -104,35 +71,20 @@ func Edit(w http.ResponseWriter, r *http.Request) {
 	// リクエストがGETの場合、編集画面の表示
 	if r.Method == "GET" {
 		id := r.URL.Query().Get("id")
-		// データベースから該当記事の取得
-		selected, err := utility.Db.Query("SELECT * FROM article WHERE id = ?", id)
-		if err != nil {
-			panic(err.Error())
-		}
-		// 結果をスキャンして構造体に格納
-		article := article{}
-		for selected.Next() {
-			err = selected.Scan(&article.Id, &article.Title, &article.Body)
-			if err != nil {
-				panic(err.Error())
-			}
-		}
-		// データベースとの接続を閉じる
-		selected.Close()
-		// 編集画面を生成して表示
+		var article article
+		utility.Db.First(&article, id)
 		tmpl.ExecuteTemplate(w, "edit.html", article)
 		// リクエストがPOSTの場合、記事の更新
 	} else if r.Method == "POST" {
 		title := r.FormValue("title")
 		body := r.FormValue("body")
 		id := r.FormValue("id")
-		// データベースの更新クエリを準備・実行
-		insert, err := utility.Db.Prepare("UPDATE article SET title=?, body=? WHERE id = ?")
-		if err != nil {
-			panic(err.Error())
-		}
-		insert.Exec(title, body, id)
-		// 記事更新後、トップページへリダイレクト
+
+		var article article
+		utility.Db.First(&article, id)
+		article.Title = title
+		article.Body = body
+		utility.Db.Save(&article)
 		http.Redirect(w, r, "/", 301)
 	}
 }
@@ -141,30 +93,12 @@ func Delete(w http.ResponseWriter, r *http.Request) {
 	// リクエストがGETの場合、削除確認画面の表示
 	if r.Method == "GET" {
 		id := r.URL.Query().Get("id")
-		// データベースから該当記事を取得
-		selected, err := utility.Db.Query("SELECT * FROM article WHERE id = ?", id)
-		if err != nil {
-			panic(err.Error())
-		}
-		// 結果をスキャンして構造体に格納
-		article := article{}
-		for selected.Next() {
-			err = selected.Scan(&article.Id, &article.Title, &article.Body)
-			if err != nil {
-				panic(err.Error())
-			}
-		}
-		// データベースとの接続を閉じる
-		selected.Close()
+		var article article
+		utility.Db.First(&article, id)
 		tmpl.ExecuteTemplate(w, "delete.html", article)
 	} else if r.Method == "POST" {
 		id := r.FormValue("id")
-		insert, err := utility.Db.Prepare("DELETE FROM article WHERE id = ?")
-		if err != nil {
-			panic(err.Error())
-		}
-		insert.Exec(id)
-		// 記事削除後、トップページへリダイレクト
+		utility.Db.Delete(&article{}, id)
 		http.Redirect(w, r, "/", 301)
 	}
 }
